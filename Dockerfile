@@ -5,7 +5,7 @@ COPY libs/ libs/
 COPY apps/api/ apps/api/
 RUN dotnet publish apps/api/Compute.Api.csproj -c Release -o /out
 
-FROM node:22-bookworm-slim AS web-build
+FROM node:26-bookworm-slim AS web-build
 COPY --from=api-build /usr/share/dotnet /usr/share/dotnet
 ENV DOTNET_ROOT=/usr/share/dotnet
 ENV PATH="${PATH}:/usr/share/dotnet"
