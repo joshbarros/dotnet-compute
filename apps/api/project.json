@@ -1,0 +1,22 @@
+{
+  "name": "api",
+  "targets": {
+    "restore": {
+      "executor": "nx:run-commands",
+      "options": { "command": "dotnet restore apps/api/Compute.Api.csproj" }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["restore"],
+      "options": { "command": "dotnet build apps/api/Compute.Api.csproj --no-restore" }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "options": {
+        "command": "dotnet run --project apps/api/Compute.Api.csproj --no-launch-profile --urls http://localhost:5215",
+        "env": { "ASPNETCORE_ENVIRONMENT": "Development" }
+      }
+    }
+  }
+}
