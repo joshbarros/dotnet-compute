@@ -1,5 +1,7 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS api-build
 WORKDIR /src
+COPY global.json Directory.Build.props Directory.Packages.props ./
+COPY libs/ libs/
 COPY apps/api/ apps/api/
 RUN dotnet publish apps/api/Compute.Api.csproj -c Release -o /out
 

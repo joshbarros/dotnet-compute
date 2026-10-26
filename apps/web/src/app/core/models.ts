@@ -14,6 +14,7 @@ export type ReservationStatus = 'Requested' | 'Held' | 'Leased' | 'Cancelled' | 
 export interface Reservation {
   id: string;
   poolCode: string;
+  ownerId: string;
   reference: string;
   hours: number;
   feeCents: number;
@@ -30,4 +31,16 @@ export interface LogEntry {
   type: string;
   module: string;
   occurredAt: string;
+}
+
+export interface UserInfo {
+  id: string;
+  email: string;
+  roles: string[];
+}
+
+export interface AuthResponse {
+  accessToken: string;
+  expiresAt: string;
+  user: UserInfo;
 }

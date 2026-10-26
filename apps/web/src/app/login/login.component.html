@@ -1,0 +1,69 @@
+<section
+  aria-labelledby="auth-h"
+  class="mx-auto mt-10 max-w-sm rounded-lg bg-white p-6 shadow-sm ring-1 ring-slate-200"
+>
+  <h2 id="auth-h" class="text-lg font-semibold">
+    {{ mode() === 'login' ? 'Sign in' : 'Create an account' }}
+  </h2>
+  <p class="mt-1 text-sm text-slate-600">
+    {{
+      mode() === 'login'
+        ? 'Sign in to reserve a team on a pool.'
+        : 'Customers can reserve a team and see their own reservations.'
+    }}
+  </p>
+
+  @if (error()) {
+    <p
+      role="alert"
+      class="mt-4 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-800 ring-1 ring-rose-200"
+    >
+      {{ error() }}
+    </p>
+  }
+
+  <form class="mt-4 hours-y-3" (submit)="$event.preventDefault(); submit()">
+    <div>
+      <label for="a-email" class="block text-xs font-medium text-slate-600">Email</label>
+      <input
+        id="a-email"
+        type="email"
+        autocomplete="username"
+        class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+        [value]="email()"
+        (input)="field(email, $event)"
+      />
+    </div>
+    <div>
+      <label for="a-password" class="block text-xs font-medium text-slate-600">Password</label>
+      <input
+        id="a-password"
+        type="password"
+        [attr.autocomplete]="mode() === 'login' ? 'current-password' : 'new-password'"
+        class="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+        [value]="password()"
+        (input)="field(password, $event)"
+      />
+      @if (mode() === 'register') {
+        <p class="mt-1 text-xs text-slate-500">
+          At least 10 characters with upper case, lower case and a digit.
+        </p>
+      }
+    </div>
+    <button
+      type="submit"
+      [disabled]="busy()"
+      class="w-full rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-60"
+    >
+      {{ mode() === 'login' ? 'Sign in' : 'Create account' }}
+    </button>
+  </form>
+
+  <button
+    type="button"
+    (click)="toggle()"
+    class="mt-4 text-sm text-sky-800 underline underline-offset-2"
+  >
+    {{ mode() === 'login' ? 'Need an account? Register' : 'Have an account? Sign in' }}
+  </button>
+</section>

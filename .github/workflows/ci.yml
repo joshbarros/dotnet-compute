@@ -31,7 +31,20 @@ jobs:
       - run: npm ci
       - run: dotnet restore Compute.sln
       - run: npm run format:check
-      - run: dotnet test tests/api/Compute.Api.Tests.csproj --no-restore
+      - name: Unit tests (no Docker)
+        run: dotnet test tests/Compute.UnitTests --no-restore --collect:"XPlat Code Coverage" --results-directory coverage
+      - name: Integration tests (real Postgres, real auth pipeline)
+        run: dotnet test tests/Compute.IntegrationTests --no-restore --collect:"XPlat Code Coverage" --results-directory coverage
+      - name: No known-vulnerable packages
+        run: |
+          dotnet list Compute.sln package --vulnerable --include-transitive 2>&1 | tee vulnerable.txt
+          ! grep -q "has the following vulnerable packages" vulnerable.txt
+      - run: npm audit --omit=dev --audit-level=high
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: ignore
       - run: npx nx run-many -t typecheck lint -p web
       - run: npx nx run-many -t build -p web api
 
