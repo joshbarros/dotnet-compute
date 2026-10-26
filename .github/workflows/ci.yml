@@ -25,7 +25,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
       - run: npm ci
