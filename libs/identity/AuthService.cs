@@ -23,6 +23,9 @@ public sealed class AuthService(
 {
     public const string MfaRequired = "A verification code is required.";
 
+    /// <summary>Hashing cost grows with the input, so an absurdly long password is refused before anything is hashed.</summary>
+    public const int MaxPasswordLength = 128;
+
     private readonly JwtOptions _o = options.Value;
     private readonly AuthOptions _auth = authOptions.Value;
 
@@ -33,6 +36,7 @@ public sealed class AuthService(
             throw new DomainException(400, "A valid email address is required.");
         if (string.IsNullOrEmpty(password))
             throw new DomainException(400, "A password is required.");
+        RequireReasonableLength(password);
 
         var user = new ApplicationUser { Id = Guid.CreateVersion7(), UserName = email, Email = email };
         var created = await users.CreateAsync(user, password);
@@ -50,7 +54,7 @@ public sealed class AuthService(
     public async Task<AuthResult> LoginAsync(string? email, string? password, string? code, CancellationToken ct)
     {
         var invalid = new DomainException(401, "Invalid email or password.");
-        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrEmpty(password))
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrEmpty(password) || password.Length > MaxPasswordLength)
             throw invalid;
 
         var user = await users.FindByEmailAsync(email);
@@ -123,6 +127,7 @@ public sealed class AuthService(
         var user = await users.FindByIdAsync(userId.ToString());
         if (user is null || string.IsNullOrEmpty(token) || string.IsNullOrEmpty(newPassword))
             throw invalid;
+        RequireReasonableLength(newPassword);
         var result = await users.ResetPasswordAsync(user, Decode(token), newPassword);
         if (!result.Succeeded)
             throw result.Errors.Any(e => e.Code == "InvalidToken") ? invalid : new DomainException(400, string.Join(" ", result.Errors.Select(e => e.Description)));
@@ -136,6 +141,9 @@ public sealed class AuthService(
         var user = await users.FindByIdAsync(userId.ToString()) ?? throw new DomainException(401, "Sign in again.");
         if (string.IsNullOrEmpty(current) || string.IsNullOrEmpty(next))
             throw new DomainException(400, "The current and the new password are required.");
+        RequireReasonableLength(next);
+        if (current.Length > MaxPasswordLength)
+            throw new DomainException(400, "The current password is not correct.");
         var result = await users.ChangePasswordAsync(user, current, next);
         if (!result.Succeeded)
             throw new DomainException(400, string.Join(" ", result.Errors.Select(e => e.Description)));
@@ -179,7 +187,7 @@ public sealed class AuthService(
     public async Task DisableMfaAsync(Guid userId, string? password, string? code, CancellationToken ct)
     {
         var user = await users.FindByIdAsync(userId.ToString()) ?? throw new DomainException(401, "Sign in again.");
-        if (string.IsNullOrEmpty(password) || !await users.CheckPasswordAsync(user, password))
+        if (string.IsNullOrEmpty(password) || password.Length > MaxPasswordLength || !await users.CheckPasswordAsync(user, password))
             throw new DomainException(400, "The password is not correct.");
         if (await users.GetTwoFactorEnabledAsync(user) && (string.IsNullOrWhiteSpace(code) || !await VerifyCodeAsync(user, code)))
             throw new DomainException(400, "That code is not valid.");
@@ -210,6 +218,12 @@ public sealed class AuthService(
         // One atomic increment: every access token leased under the old version stops working.
         await db.Users.Where(u => u.Id == userId)
             .ExecuteUpdateAsync(s => s.SetProperty(u => u.SessionVersion, u => u.SessionVersion + 1), ct);
+    }
+
+    private static void RequireReasonableLength(string password)
+    {
+        if (password.Length > MaxPasswordLength)
+            throw new DomainException(400, $"A password is at most {MaxPasswordLength} characters.");
     }
 
     private static string Encode(string token) => WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(token));

@@ -133,4 +133,21 @@ public class AccountFlowTests
         var jwt = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().ReadJwtToken(tokens.CreateAccessToken(Guid.NewGuid(), "a@b.c", [], 3).Value);
         Assert.Equal("3", jwt.Claims.Single(c => c.Type == TokenService.VersionClaim).Value);
     }
+
+    [Fact]
+    public async Task PasswordsLongerThanTheLimit_AreRefusedBeforeAnythingIsHashed()
+    {
+        using var sp = AuthServiceTests.Build();
+        await AuthServiceTests.SeedRolesAsync(sp);
+        var auth = sp.GetRequiredService<AuthService>();
+        var tooLong = "Aa1" + new string('x', AuthService.MaxPasswordLength);
+
+        var register = await Assert.ThrowsAsync<DomainException>(() => auth.RegisterAsync("ana@example.com", tooLong, default));
+        Assert.Equal(400, register.Status);
+        var login = await Assert.ThrowsAsync<DomainException>(() => auth.LoginAsync("ana@example.com", new string('x', 1_000_000), default));
+        Assert.Equal(401, login.Status);
+
+        var exactly = "Aa1" + new string('y', AuthService.MaxPasswordLength - 3);
+        Assert.NotNull(await auth.RegisterAsync("bo@example.com", exactly, default));
+    }
 }
