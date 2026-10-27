@@ -135,26 +135,29 @@ API=http://127.0.0.1:5215
 login() { curl -s -X POST $API/api/auth/login -H 'content-type: application/json' -d "{\"email\":\"$1\",\"password\":\"$2\"}" | python3 -c 'import sys,json; print(json.load(sys.stdin)["accessToken"])'; }
 ADMIN="Authorization: Bearer $(login admin@compute.local ComputeAdmin2026)"
 
-curl -s -X POST $API/api/pools -H "$ADMIN" -H 'content-type: application/json' \
-  -d '{"code":"SANTOS-RTM-1","name":"H100 Pool East","gpuModel":"H100","region":"us-east1","hourCapacity":10}'
-
 curl -s -X POST $API/api/auth/register -H 'content-type: application/json' \
   -d '{"email":"ana@example.com","password":"Passw0rd-Demo1"}'      # 201; its accessToken goes in $ANA below
 ANA="Authorization: Bearer <accessToken>"
 
-curl -s -X POST $API/api/reservations -H "$ANA" -H 'content-type: application/json' \
-  -d '{"poolCode":"SANTOS-RTM-1","reference":"TEAM-1001","hours":3}'
-# 202, status Requested. Use the returned id:
+curl -s -H "$ADMIN" -X POST $API/api/pools \
+  -H 'content-type: application/json' \
+  -d '{"code":"H100-EAST-1112","name":"H100 Pool East","gpuModel":"H100","region":"us-east1","hourCapacity":30}'
 
-curl -s -H "$ANA" $API/api/reservations/<id>             # Leased after a few seconds, with a lease number
+curl -s -H "$ANA" -X POST $API/api/reservations \
+  -H 'content-type: application/json' \
+  -d '{"poolCode":"H100-EAST-1112","reference":"TEAM-1001","hours":10}'
+# 202, status Requested, feeCents 3200. Use the returned id:
+
+curl -s -H "$ANA" $API/api/reservations/<id>         # Leased after a few seconds, with a lease number
 curl -s -H "$ANA" $API/api/leases/<id>
-curl -s -H "$ANA" $API/api/pools/SANTOS-RTM-1     # hoursLeft 20
-curl -s -H "$ADMIN" $API/api/reservations/<id>/events    # the Kafka log; staff only (a customer gets 403)
+curl -s -H "$ANA" $API/api/pools/H100-EAST-1112      # hoursLeft 20
+curl -s -H "$ADMIN" $API/api/reservations/<id>/events  # the Kafka log for this reservation
 
-curl -s -X POST -H "$ANA" $API/api/reservations/<id>/cancellation   # hours come back; the lease stays
+curl -s -H "$ANA" -X POST $API/api/reservations/<id>/cancellation \
+  -H 'content-type: application/json'                       # hours come back; the lease stays
 ```
 
-A reservation is validated at the door: reference required (at most 40 characters), hours from 1 to 24 hours. The poison match is a case-sensitive substring: `TEAM-POISON-7` and any longer token containing `POISON` match.
+A reservation is validated at the door: team reference required (at most 40 characters), 1 to 24 hours. The poison match is a case-sensitive substring: `TEAM-POISON-7` and any longer token containing `POISON` match.
 
 ## Develop with Nx
 
