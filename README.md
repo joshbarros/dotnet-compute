@@ -257,7 +257,7 @@ docker compose exec db psql -U compute -d compute -c 'select "RoutingKey","SentA
 open http://127.0.0.1:15705        # RabbitMQ management, platform / platform
 ```
 
-- **Dead-lettered messages** sit in `leases.work.dlq`. Nothing replays them; inspect them in the management UI. Retries wait in `<queue>.retry` for 2 seconds.
+- **Dead-lettered messages** sit in `leases.work.dlq`. Staff can list and replay them from `/api/admin/dead-letters`, or inspect them in the management UI. Retries wait in `<queue>.retry` for 2 seconds.
 - **A port is already in use**: `lsof -nP -i :5215` shows who holds it. Compose publishes only on `127.0.0.1`.
 - **`dotnet test` cannot connect**: start Postgres first with `docker compose up -d --wait db`.
 - **The smoke cannot reach the API**: run `docker compose up --build --wait` first; override the target with `API=... RABBIT=... ./scripts/smoke.sh`.
@@ -304,3 +304,4 @@ Nx 23.2.1 orchestrates `nx build web` and `nx build api`; Each module's EF Core 
 - [dotnet-carbon](https://github.com/joshbarros/dotnet-carbon): carbon credit batches and purchases.
 - [dotnet-charging](https://github.com/joshbarros/dotnet-charging): EV charger slot reservations.
 - [dotnet-promo](https://github.com/joshbarros/dotnet-promo): limited-use promo codes and redemptions.
+- [dotnet-mint](https://github.com/joshbarros/dotnet-mint): limited-edition drops with a per-collector limit.
