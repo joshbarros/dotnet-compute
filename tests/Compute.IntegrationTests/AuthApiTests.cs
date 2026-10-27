@@ -173,13 +173,26 @@ public class AuthApiTests(ApiFactory factory)
     }
 
     [Fact]
-    public async Task AuthEndpoints_AreRateLimitedPerClient()
+    public async Task AuthEndpoints_AreRateLimitedPerClient_AcrossInstances()
     {
-        await using var limited = factory.WithWebHostBuilder(b => b.UseSetting("RateLimit:AuthPerMinute", "3"));
-        var client = limited.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { HandleCookies = false });
+        // Two API instances against one database share one count per client, so splitting traffic between them does not help.
+        var client = $"10.{Random.Shared.Next(1, 250)}.{Random.Shared.Next(1, 250)}.{Random.Shared.Next(1, 250)}";
+        void Configure(Microsoft.AspNetCore.Hosting.IWebHostBuilder b) => b
+            .UseSetting("RateLimit:AuthPerMinute", "3").UseSetting("ForwardedHeaders:Enabled", "true");
+        await using var first = factory.WithWebHostBuilder(Configure);
+        await using var second = factory.WithWebHostBuilder(Configure);
+
         var statuses = new List<HttpStatusCode>();
         for (var i = 0; i < 5; i++)
-            statuses.Add((await client.PostAsJsonAsync("/api/auth/login", new { email = "nobody@test.local", password = "Wrong-Passw0rd" })).StatusCode);
+        {
+            var instance = i % 2 == 0 ? first : second;
+            var request = new HttpRequestMessage(HttpMethod.Post, "/api/auth/login")
+            {
+                Content = JsonContent.Create(new { email = "nobody@test.local", password = "Wrong-Passw0rd" }),
+            };
+            request.Headers.Add("X-Forwarded-For", client);
+            statuses.Add((await instance.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { HandleCookies = false }).SendAsync(request)).StatusCode);
+        }
 
         Assert.Equal(3, statuses.Count(s => s == HttpStatusCode.Unauthorized));
         Assert.Equal(2, statuses.Count(s => s == HttpStatusCode.TooManyRequests));

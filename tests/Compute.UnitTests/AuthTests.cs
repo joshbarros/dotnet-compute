@@ -207,3 +207,46 @@ public class HttpCurrentUserTests
         Assert.False(user.IsStaff);
     }
 }
+
+public class AsymmetricSigningTests
+{
+    private static string NewPem() => System.Security.Cryptography.RSA.Create(2048).ExportPkcs8PrivateKeyPem();
+
+    [Fact]
+    public async Task Rs256Tokens_VerifyWithOnlyThePublicKey()
+    {
+        var options = new JwtOptions { RsaPrivateKeyPem = NewPem(), Key = "" };
+        var service = new TokenService(Microsoft.Extensions.Options.Options.Create(options), TimeProvider.System);
+        var token = service.CreateAccessToken(Guid.NewGuid(), "a@b.c", ["Customer"], 0).Value;
+
+        var jwks = System.Text.Json.JsonSerializer.SerializeToElement(service.PublicKeySet());
+        var key = jwks.GetProperty("keys")[0];
+        Assert.Equal("RS256", key.GetProperty("alg").GetString());
+        Assert.False(key.TryGetProperty("d", out _)); // never the private part
+
+        var verifier = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
+        {
+            ValidIssuer = options.Issuer,
+            ValidAudience = options.Audience,
+            ValidAlgorithms = ["RS256"],
+            IssuerSigningKey = new Microsoft.IdentityModel.Tokens.JsonWebKey(key.GetRawText()),
+        };
+        var result = await new Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler().ValidateTokenAsync(token, verifier);
+        Assert.True(result.IsValid, result.Exception?.Message);
+    }
+
+    [Fact]
+    public void WithASharedSecret_NoKeySetIsPublished()
+    {
+        var service = new TokenService(Microsoft.Extensions.Options.Options.Create(new JwtOptions { Key = TestJwt.Key }), TimeProvider.System);
+        Assert.Null(service.PublicKeySet());
+    }
+
+    [Fact]
+    public void Options_AcceptEitherKind_ButNeitherAlone()
+    {
+        Assert.True(JwtOptions.IsValid(new JwtOptions { RsaPrivateKeyPem = NewPem() }));
+        Assert.True(JwtOptions.IsValid(new JwtOptions { Key = TestJwt.Key }));
+        Assert.False(JwtOptions.IsValid(new JwtOptions()));
+    }
+}

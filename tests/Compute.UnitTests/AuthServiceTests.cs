@@ -15,10 +15,11 @@ public class AuthServiceTests
 {
     private const string Strong = "Passw0rd-Test1";
 
-    private static ServiceProvider Build(string? seedEmail = null, string? seedPassword = null)
+    internal static ServiceProvider Build(string? seedEmail = null, string? seedPassword = null, bool requireConfirmedEmail = false)
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddDataProtection();
         services.AddSingleton(TimeProvider.System);
         var databaseName = Guid.NewGuid().ToString();
         services.AddDbContext<IdentityModuleDbContext>(o => o.UseInMemoryDatabase(databaseName));
@@ -31,8 +32,12 @@ public class AuthServiceTests
                 o.Lockout.MaxFailedAccessAttempts = 5;
             })
             .AddRoles<IdentityRole<Guid>>()
-            .AddEntityFrameworkStores<IdentityModuleDbContext>();
+            .AddEntityFrameworkStores<IdentityModuleDbContext>()
+            .AddDefaultTokenProviders();
         services.AddSingleton(Options.Create(new JwtOptions { Key = TestJwt.Key }));
+        services.AddSingleton(Options.Create(new AuthOptions { RequireConfirmedEmail = requireConfirmedEmail }));
+        services.AddSingleton<CapturingMailer>();
+        services.AddSingleton<IAuthMailer>(sp => sp.GetRequiredService<CapturingMailer>());
         services.AddSingleton<TokenService>();
         services.AddScoped<AuthService>();
         services.AddSingleton(Options.Create(new SeedAdminOptions { Email = seedEmail, Password = seedPassword }));
@@ -40,7 +45,7 @@ public class AuthServiceTests
         return services.BuildServiceProvider();
     }
 
-    private static async Task SeedRolesAsync(IServiceProvider sp)
+    internal static async Task SeedRolesAsync(IServiceProvider sp)
     {
         await sp.GetRequiredService<IdentitySeeder>().MigrateAsync(sp, default);
     }
@@ -53,8 +58,8 @@ public class AuthServiceTests
 
         var result = await sp.GetRequiredService<AuthService>().RegisterAsync("ana@example.com", Strong, default);
 
-        Assert.Equal("ana@example.com", result.User.Email);
-        Assert.Equal([Roles.Customer], result.User.Roles);
+        Assert.Equal("ana@example.com", result!.User.Email);
+        Assert.Equal([Roles.Customer], result!.User.Roles);
         Assert.False(string.IsNullOrEmpty(result.Access.Value));
         Assert.True(result.RefreshExpiresAt > DateTimeOffset.UtcNow.AddDays(13));
     }
@@ -68,7 +73,7 @@ public class AuthServiceTests
         var result = await sp.GetRequiredService<AuthService>().RegisterAsync("ana@example.com", Strong, default);
 
         var stored = await sp.GetRequiredService<IdentityModuleDbContext>().RefreshTokens.SingleAsync();
-        Assert.Equal(TokenService.Hash(result.RefreshToken), stored.TokenHash);
+        Assert.Equal(TokenService.Hash(result!.RefreshToken), stored.TokenHash);
         Assert.NotEqual(result.RefreshToken, stored.TokenHash);
     }
 
@@ -119,7 +124,7 @@ public class AuthServiceTests
         await auth.RegisterAsync("ana@example.com", Strong, default);
 
         var result = await auth.LoginAsync("ana@example.com", Strong, default);
-        Assert.Equal("ana@example.com", result.User.Email);
+        Assert.Equal("ana@example.com", result!.User.Email);
     }
 
     [Fact]
@@ -227,5 +232,16 @@ public class AuthServiceTests
     {
         using var sp = Build("admin@example.com", "weak");
         await Assert.ThrowsAsync<InvalidOperationException>(() => SeedRolesAsync(sp));
+    }
+}
+
+public sealed class CapturingMailer : IAuthMailer
+{
+    public List<MailMessageData> Sent { get; } = [];
+
+    public Task SendAsync(MailMessageData message, CancellationToken ct)
+    {
+        Sent.Add(message);
+        return Task.CompletedTask;
     }
 }

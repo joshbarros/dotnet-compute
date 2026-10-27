@@ -31,11 +31,57 @@ export class AuthService {
     this.ready.set(true);
   }
 
-  login = (email: string, password: string) =>
-    this.enter(this.http.post<AuthResponse>('/api/auth/login', { email, password }));
+  login = (email: string, password: string, code?: string) =>
+    this.enter(this.http.post<AuthResponse>('/api/auth/login', { email, password, code }));
 
-  register = (email: string, password: string) =>
-    this.enter(this.http.post<AuthResponse>('/api/auth/register', { email, password }));
+  /** Returns a message when the address has to be confirmed first, or null when the user is already signed in. */
+  async register(email: string, password: string): Promise<string | null> {
+    const body = await firstValueFrom(
+      this.http.post<AuthResponse | { message: string }>('/api/auth/register', { email, password }),
+    );
+    if ('accessToken' in body) {
+      this.state.set({ token: body.accessToken, user: body.user });
+      return null;
+    }
+    return body.message;
+  }
+
+  confirmEmail = (userId: string, token: string) =>
+    firstValueFrom(this.http.post('/api/auth/confirm-email', { userId, token }));
+
+  resendConfirmation = (email: string) =>
+    firstValueFrom(this.http.post('/api/auth/resend-confirmation', { email }));
+
+  forgotPassword = (email: string) =>
+    firstValueFrom(this.http.post('/api/auth/forgot-password', { email }));
+
+  resetPassword = (userId: string, token: string, newPassword: string) =>
+    firstValueFrom(this.http.post('/api/auth/reset-password', { userId, token, newPassword }));
+
+  changePassword = (currentPassword: string, newPassword: string) =>
+    this.enter(
+      this.http.post<AuthResponse>('/api/auth/change-password', { currentPassword, newPassword }),
+    );
+
+  async logoutEverywhere(): Promise<void> {
+    try {
+      await firstValueFrom(this.http.post('/api/auth/logout-everywhere', {}));
+    } finally {
+      this.state.set(null);
+    }
+  }
+
+  mfaStatus = () => firstValueFrom(this.http.get<{ enabled: boolean }>('/api/auth/mfa'));
+  mfaSetup = () =>
+    firstValueFrom(
+      this.http.post<{ sharedKey: string; otpAuthUri: string }>('/api/auth/mfa/setup', {}),
+    );
+  mfaEnable = (code: string) =>
+    firstValueFrom(this.http.post<{ codes: string[] }>('/api/auth/mfa/enable', { code }));
+  async mfaDisable(password: string, code: string): Promise<void> {
+    await firstValueFrom(this.http.post('/api/auth/mfa/disable', { password, code }));
+    this.state.set(null); // disabling ends every session; sign in again
+  }
 
   /** Concurrent callers share one request: refresh tokens are single-use, so a second call would look like a replay. */
   refresh(): Promise<boolean> {

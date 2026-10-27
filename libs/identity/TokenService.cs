@@ -12,11 +12,38 @@ public record AccessToken(string Value, DateTimeOffset ExpiresAt);
 /// <summary>Creates and hashes tokens. It knows nothing about the database, so it is a plain unit-test target.</summary>
 public sealed class TokenService(IOptions<JwtOptions> options, TimeProvider clock)
 {
+    public const string VersionClaim = "ver";
+
     private readonly JwtOptions _o = options.Value;
 
-    public SymmetricSecurityKey SigningKey => new(Encoding.UTF8.GetBytes(_o.Key));
+    private readonly RsaSecurityKey? _rsa = LoadRsa(options.Value);
 
-    public AccessToken CreateAccessToken(Guid userId, string email, IEnumerable<string> roles)
+    /// <summary>True when tokens are signed with RS256 and the public key is published.</summary>
+    public bool UsesRsa => _rsa is not null;
+
+    public SecurityKey SigningKey => _rsa is not null ? _rsa : new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_o.Key));
+
+    private string Algorithm => UsesRsa ? SecurityAlgorithms.RsaSha256 : SecurityAlgorithms.HmacSha256;
+
+    private static RsaSecurityKey? LoadRsa(JwtOptions o)
+    {
+        if (string.IsNullOrWhiteSpace(o.RsaPrivateKeyPem))
+            return null;
+        var rsa = RSA.Create();
+        rsa.ImportFromPem(o.RsaPrivateKeyPem);
+        return new RsaSecurityKey(rsa) { KeyId = o.KeyId };
+    }
+
+    /// <summary>The public half of the signing key as a JWK set, or null when tokens are signed with a shared secret.</summary>
+    public object? PublicKeySet()
+    {
+        if (_rsa is null)
+            return null;
+        var jwk = JsonWebKeyConverter.ConvertFromRSASecurityKey(new RsaSecurityKey(_rsa.Rsa.ExportParameters(false)) { KeyId = _o.KeyId });
+        return new { keys = new[] { new { kty = jwk.Kty, use = "sig", alg = SecurityAlgorithms.RsaSha256, kid = jwk.Kid, n = jwk.N, e = jwk.E } } };
+    }
+
+    public AccessToken CreateAccessToken(Guid userId, string email, IEnumerable<string> roles, int? sessionVersion = null)
     {
         var now = clock.GetUtcNow();
         var expires = now.AddMinutes(_o.AccessMinutes);
@@ -26,6 +53,8 @@ public sealed class TokenService(IOptions<JwtOptions> options, TimeProvider cloc
             new("email", email),
             new("jti", Guid.NewGuid().ToString("N")),
         };
+        if (sessionVersion is { } version)
+            claims.Add(new Claim(VersionClaim, version.ToString()));
         claims.AddRange(roles.Select(r => new Claim("role", r)));
 
         var descriptor = new SecurityTokenDescriptor
@@ -36,7 +65,7 @@ public sealed class TokenService(IOptions<JwtOptions> options, TimeProvider cloc
             IssuedAt = now.UtcDateTime,
             NotBefore = now.UtcDateTime,
             Expires = expires.UtcDateTime,
-            SigningCredentials = new SigningCredentials(SigningKey, SecurityAlgorithms.HmacSha256),
+            SigningCredentials = new SigningCredentials(SigningKey, Algorithm),
         };
         return new AccessToken(new JsonWebTokenHandler().CreateToken(descriptor), expires);
     }
@@ -60,6 +89,6 @@ public sealed class TokenService(IOptions<JwtOptions> options, TimeProvider cloc
         RequireExpirationTime = true,
         NameClaimType = "sub",
         RoleClaimType = "role",
-        ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
+        ValidAlgorithms = [Algorithm],
     };
 }

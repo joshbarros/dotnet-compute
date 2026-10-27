@@ -85,6 +85,11 @@ services:
       # The browser specs sign in many times from one address; the code default is 20 a minute.
       RateLimit__AuthPerMinute: ${AUTH_RATE_LIMIT:-120}
       Logging__Json: "true"
+      # Demo conveniences. Production: confirmation on, dev mailbox off, a real SMTP host (Mail__Host and friends).
+      Jwt__RevocationCacheSeconds: "2"
+      Auth__RequireConfirmedEmail: ${REQUIRE_CONFIRMED_EMAIL:-false}
+      Auth__PublicUrl: http://127.0.0.1:8095
+      Mail__DevMailbox: ${DEV_MAILBOX:-true}
       ConnectionStrings__Compute: "Host=db;Port=5432;Database=compute;Username=compute;Password=compute"
       RabbitMq__Host: rabbitmq
       RabbitMq__Port: 5672

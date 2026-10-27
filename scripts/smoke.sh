@@ -61,6 +61,20 @@ IDA="$(book "A-$RUN" "TEAM-$RUN-OWN" 1)"
 [ "$(code_of -X POST -H "$OTHER" "$API/api/reservations/$IDA/cancellation")" = 404 ] || fail "another customer must not cancel it"
 say "401 anonymous, 401 bad password, 403 customer opening a pool, 404 for another customer, 403 on the event log"
 
+echo "0b. password reset ends the old sessions (needs the dev mailbox the demo stack turns on)"
+RESET_EMAIL="reset-$RUN@example.com"
+OLD="$(curl -sf -X POST "$API/api/auth/register" -H "$JSON" -d "{\"email\":\"$RESET_EMAIL\",\"password\":\"$CUSTOMER_PASSWORD\"}" | token_of)"
+[ "$(code_of -H "Authorization: Bearer $OLD" "$API/api/auth/me")" = 200 ] || fail "the new session should work"
+[ "$(code_of -X POST "$API/api/auth/forgot-password" -H "$JSON" -d "{\"email\":\"nobody-$RUN@example.com\"}")" = 202 ] || fail "an unknown address must look the same"
+curl -sf -X POST "$API/api/auth/forgot-password" -H "$JSON" -d "{\"email\":\"$RESET_EMAIL\"}" >/dev/null || fail "forgot-password failed"
+LINK="$(curl -sf "$API/api/dev/mailbox?to=$RESET_EMAIL" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['link'])")"
+link_param() { python3 -c "import sys,urllib.parse as u; print(u.parse_qs(u.urlparse(sys.argv[1]).query)['$1'][0])" "$LINK"; }
+[ "$(code_of -X POST "$API/api/auth/reset-password" -H "$JSON" -d "{\"userId\":\"$(link_param reset)\",\"token\":\"$(link_param token)\",\"newPassword\":\"Another-Passw0rd9\"}")" = 204 ] || fail "reset failed"
+sleep 3 # the session version is cached for a moment
+[ "$(code_of -H "Authorization: Bearer $OLD" "$API/api/auth/me")" = 401 ] || fail "the old access token should be revoked"
+[ "$(code_of -X POST "$API/api/auth/login" -H "$JSON" -d "{\"email\":\"$RESET_EMAIL\",\"password\":\"Another-Passw0rd9\"}")" = 200 ] || fail "the new password should work"
+say "reset link works once, the old access token is revoked, the new password signs in"
+
 echo "1. input is validated at the door"
 open_pool "V-$RUN" 10
 for body in \

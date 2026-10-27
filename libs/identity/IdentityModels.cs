@@ -1,10 +1,15 @@
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace Compute.Identity;
 
-public class ApplicationUser : IdentityUser<Guid>;
+public class ApplicationUser : IdentityUser<Guid>
+{
+    /// <summary>Counts how many times every session of this user was ended at once. Access tokens carry the value they were leased under.</summary>
+    public int SessionVersion { get; set; }
+}
 
 /// <summary>
 /// A refresh token as stored: only its SHA-256 hash, never the token. Tokens rotate on every use and belong to a family;
@@ -22,17 +27,34 @@ public class RefreshToken
     public string? ReplacedByHash { get; set; }
 }
 
+/// <summary>One counter per client per minute window, shared by every API instance through Postgres.</summary>
+public class RateLimitHit
+{
+    public string Key { get; set; } = "";
+    public DateTimeOffset WindowStart { get; set; }
+    public int Count { get; set; }
+}
+
 public class IdentityModuleDbContext(DbContextOptions<IdentityModuleDbContext> options)
-    : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>(options)
+    : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>(options), IDataProtectionKeyContext
 {
     public const string Schema = "identity";
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<RateLimitHit> RateLimitHits => Set<RateLimitHit>();
+
+    /// <summary>The keys that protect confirmation and reset tokens, shared by every instance and kept across restarts.</summary>
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);
         b.HasDefaultSchema(Schema);
+        b.Entity<RateLimitHit>(e =>
+        {
+            e.HasKey(x => new { x.Key, x.WindowStart });
+            e.Property(x => x.Key).HasMaxLength(128);
+        });
         b.Entity<RefreshToken>(e =>
         {
             e.HasKey(x => x.Id);

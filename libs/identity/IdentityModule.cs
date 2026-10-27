@@ -1,11 +1,10 @@
-using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.DataProtection;
 using Compute.Shared;
 using Compute.Shared.Auth;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,6 +23,21 @@ public static class IdentityModule
             .Validate(JwtOptions.IsValid, "Jwt:Key must be at least 32 bytes, AccessMinutes 1-120 and RefreshDays 1-90.")
             .ValidateOnStart();
         services.Configure<SeedAdminOptions>(config.GetSection(SeedAdminOptions.Section));
+        services.Configure<AuthOptions>(config.GetSection(AuthOptions.Section));
+        services.Configure<MailOptions>(config.GetSection(MailOptions.Section));
+        services.AddMemoryCache();
+        services.AddScoped<SessionVersionChecker>();
+
+        var mail = config.GetSection(MailOptions.Section).Get<MailOptions>() ?? new MailOptions();
+        if (string.IsNullOrWhiteSpace(mail.Host))
+            services.AddSingleton<IAuthMailer, LogMailer>();
+        else
+            services.AddSingleton<IAuthMailer, SmtpMailer>();
+        if (mail.DevMailbox)
+        {
+            services.AddSingleton<DevMailbox>();
+            services.DecorateWithDevMailbox();
+        }
 
         services.AddDbContext<IdentityModuleDbContext>(o => o.UseNpgsql(connection,
             n => n.MigrationsHistoryTable("__EFMigrationsHistory", IdentityModuleDbContext.Schema)));
@@ -40,10 +54,13 @@ public static class IdentityModule
                 o.Lockout.AllowedForNewUsers = true;
                 o.Lockout.MaxFailedAccessAttempts = 5;
                 o.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+                o.Tokens.EmailConfirmationTokenProvider = TokenOptions.DefaultEmailProvider;
             })
+            .AddDefaultTokenProviders()
             .AddRoles<IdentityRole<Guid>>()
             .AddEntityFrameworkStores<IdentityModuleDbContext>();
 
+        services.AddDataProtection().SetApplicationName("compute").PersistKeysToDbContext<IdentityModuleDbContext>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<TokenService>();
         services.AddScoped<AuthService>();
@@ -54,16 +71,19 @@ public static class IdentityModule
             {
                 o.MapInboundClaims = false;
                 o.TokenValidationParameters = tokens.ValidationParameters();
+                o.Events = new JwtBearerEvents
+                {
+                    // A password change, a reset or "sign out everywhere" bumps the user's session version; older tokens stop here.
+                    OnTokenValidated = async context =>
+                    {
+                        var sub = context.Principal?.FindFirst("sub")?.Value;
+                        var tag = context.Principal?.FindFirst(TokenService.VersionClaim)?.Value;
+                        var checker = context.HttpContext.RequestServices.GetRequiredService<SessionVersionChecker>();
+                        if (!Guid.TryParse(sub, out var userId) || !await checker.IsCurrentAsync(userId, tag, context.HttpContext.RequestAborted))
+                            context.Fail("The session was ended.");
+                    },
+                };
             });
-
-        var authPerMinute = config.GetValue("RateLimit:AuthPerMinute", 20);
-        services.AddRateLimiter(o =>
-        {
-            o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-            o.AddPolicy("auth", context => RateLimitPartition.GetFixedWindowLimiter(
-                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-                _ => new FixedWindowRateLimiterOptions { PermitLimit = authPerMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
-        });
 
         services.AddSingleton<IModuleMigrator>(new EfMigrator<IdentityModuleDbContext>(order: 0));
         services.AddSingleton<IModuleMigrator, IdentitySeeder>();
@@ -104,5 +124,19 @@ public sealed class IdentitySeeder(IOptions<SeedAdminOptions> seed, ILogger<Iden
             throw new InvalidOperationException("The seeded administrator could not be created: " + string.Join(" ", created.Errors.Select(e => e.Description)));
         await users.AddToRoleAsync(admin, Roles.Admin);
         logger.LogInformation("Seeded administrator {Email}", o.Email);
+    }
+}
+
+public static class MailDecoration
+{
+    /// <summary>Wraps whichever mailer is registered so every message also lands in the dev mailbox.</summary>
+    public static IServiceCollection DecorateWithDevMailbox(this IServiceCollection services)
+    {
+        var inner = services.Last(d => d.ServiceType == typeof(IAuthMailer));
+        services.Remove(inner);
+        services.AddSingleton<IAuthMailer>(sp => new RecordingMailer(
+            (IAuthMailer)(inner.ImplementationType is not null ? ActivatorUtilities.CreateInstance(sp, inner.ImplementationType) : inner.ImplementationInstance!),
+            sp.GetRequiredService<DevMailbox>()));
+        return services;
     }
 }

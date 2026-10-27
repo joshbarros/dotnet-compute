@@ -55,7 +55,7 @@ app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseMiddleware<ExceptionMiddleware>();
 app.UseStatusCodePages();
-app.UseRateLimiter();
+app.UseAuthRateLimit();
 app.UseAuthentication();
 app.UseAuthorization();
 

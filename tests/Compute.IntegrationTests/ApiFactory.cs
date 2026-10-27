@@ -31,6 +31,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         builder.UseSetting("Identity:SeedAdmin:Password", AdminPassword);
         builder.UseSetting("RateLimit:AuthPerMinute", "100000");
         builder.UseSetting("Docs:Public", "true");
+        builder.UseSetting("Auth:RequireConfirmedEmail", "false");
+        builder.UseSetting("Mail:DevMailbox", "true");
+        builder.UseSetting("Jwt:RevocationCacheSeconds", "0");
     }
 }
 
@@ -49,6 +52,16 @@ public static class ApiHelpers
         if (accessToken is not null)
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         return client;
+    }
+
+    /// <summary>The newest link mailed to an address: (user id, token), read from the dev mailbox.</summary>
+    public static async Task<(Guid UserId, string Token, string Link)> LatestMailLinkAsync(this WebApplicationFactory<Program> factory, string email)
+    {
+        var mails = await factory.CreateClient().GetFromJsonAsync<JsonElement>($"/api/dev/mailbox?to={Uri.EscapeDataString(email)}");
+        var link = mails.EnumerateArray().First().GetProperty("link").GetString()!;
+        var query = System.Web.HttpUtility.ParseQueryString(new Uri(link).Query);
+        var userId = Guid.Parse((query["confirm"] ?? query["reset"])!);
+        return (userId, query["token"]!, link);
     }
 
     public static string NewEmail() => $"user-{Guid.NewGuid():N}@test.local";
