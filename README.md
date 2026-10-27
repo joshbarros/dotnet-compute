@@ -305,3 +305,4 @@ Nx 23.2.1 orchestrates `nx build web` and `nx build api`; Each module's EF Core 
 - [dotnet-charging](https://github.com/joshbarros/dotnet-charging): EV charger slot reservations.
 - [dotnet-promo](https://github.com/joshbarros/dotnet-promo): limited-use promo codes and redemptions.
 - [dotnet-mint](https://github.com/joshbarros/dotnet-mint): limited-edition drops with a per-collector limit.
+- [dotnet-pledge](https://github.com/joshbarros/dotnet-pledge): matched donations from a sponsor's matching pool.
