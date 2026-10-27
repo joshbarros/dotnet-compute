@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -19,8 +20,13 @@ public sealed class OutboxRelay(
     OutboxSources sources,
     RabbitConnection rabbit,
     KafkaLog kafka,
+    IConfiguration config,
     ILogger<OutboxRelay> logger) : BackgroundService
 {
+    private readonly TimeSpan _outboxRetention = TimeSpan.FromDays(config.GetValue("Messaging:OutboxRetentionDays", 7));
+    private readonly TimeSpan _inboxRetention = TimeSpan.FromDays(config.GetValue("Messaging:InboxRetentionDays", 30));
+    private DateTimeOffset _lastTrim = DateTimeOffset.MinValue;
+
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         await kafka.EnsureTopicAsync(ct);
@@ -39,8 +45,7 @@ public sealed class OutboxRelay(
                 {
                     using var scope = scopes.CreateScope();
                     var db = (ModuleDbContext)scope.ServiceProvider.GetRequiredService(contextType);
-                    var batch = await db.Outbox.Where(o => o.SentAt == null).OrderBy(o => o.Id).Take(50).ToListAsync(ct);
-                    foreach (var row in batch)
+                    published += await OutboxBatch.PublishPendingAsync(db, async row =>
                     {
                         var properties = new BasicProperties
                         {
@@ -61,12 +66,17 @@ public sealed class OutboxRelay(
                             payload = JsonDocument.Parse(row.Payload).RootElement,
                         });
                         await kafka.AppendAsync(row.Key, envelope, ct);
+                    }, 50, ct);
 
-                        row.SentAt = DateTimeOffset.UtcNow;
-                        await db.SaveChangesAsync(ct);
-                        published++;
+                    if (DateTimeOffset.UtcNow - _lastTrim > TimeSpan.FromMinutes(10))
+                    {
+                        var (outbox, inbox) = await OutboxBatch.TrimAsync(db, _outboxRetention, _inboxRetention, ct);
+                        if (outbox + inbox > 0)
+                            logger.LogInformation("Trimmed {Outbox} sent outbox rows and {Inbox} old inbox claims", outbox, inbox);
                     }
                 }
+                if (DateTimeOffset.UtcNow - _lastTrim > TimeSpan.FromMinutes(10))
+                    _lastTrim = DateTimeOffset.UtcNow;
 
                 if (published == 0)
                     await Task.Delay(200, ct);

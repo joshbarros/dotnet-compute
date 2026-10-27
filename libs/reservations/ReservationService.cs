@@ -63,7 +63,7 @@ public class ReservationService(ReservationsDbContext db, IPoolCatalog pools, IC
         return reservation;
     }
 
-    public async Task<List<Reservation>> ListAsync(string? poolCode, CancellationToken ct)
+    public async Task<(List<Reservation> Items, int Total)> ListAsync(string? poolCode, int page, int pageSize, CancellationToken ct)
     {
         var query = db.Reservations.AsNoTracking();
         if (!user.IsStaff)
@@ -73,7 +73,9 @@ public class ReservationService(ReservationsDbContext db, IPoolCatalog pools, IC
         }
         if (!string.IsNullOrWhiteSpace(poolCode))
             query = query.Where(b => b.PoolCode == poolCode);
-        return await query.OrderByDescending(b => b.CreatedAt).Take(100).ToListAsync(ct);
+        var total = await query.CountAsync(ct);
+        var items = await query.OrderByDescending(b => b.CreatedAt).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+        return (items, total);
     }
 
     /// <summary>Moves Held or Leased to Cancelled and asks Pools to give the hours back. The lease is not touched.</summary>

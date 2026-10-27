@@ -133,6 +133,16 @@ wait_for "leases.work.dlq to gain one message" dlq_is $((BEFORE + 1))
 [ "$(reservation_field "$IDP" hoursReleasedAt)" != None ] || fail "reservation should record the release"
 say "rejected, dead-lettered (+1 in leases.work.dlq), remaining back to 5"
 
+echo "4b. dead letters can be listed by staff only, and replayed"
+[ "$(code_of -H "$CUS" "$API/api/admin/dead-letters")" = 403 ] || fail "dead letters are staff only"
+curl -sf -H "$ADM" "$API/api/admin/dead-letters" | python3 -c "import sys,json; q={x['queue']:x for x in json.load(sys.stdin)}; assert q['leases.work']['count']>=1, q" || fail "the dead-letter queue should list the poison message"
+BEFORE_REPLAY="$(dlq_count)"
+REPLAYED="$(curl -sf -X POST -H "$ADM" "$API/api/admin/dead-letters/leases.work/replay?max=100" | jget "['replayed']")" || fail "replay failed"
+[ "$REPLAYED" -ge 1 ] || fail "replay should have taken at least one message"
+# The poison reference still fails for the same reason, so it is retried and dead-lettered again: replay is for fixed causes.
+wait_for "the replayed poison message to be dead-lettered again" dlq_is "$BEFORE_REPLAY"
+say "listed, replayed $REPLAYED, dead-lettered again because the cause is still there"
+
 echo "5. cancellation races the final mark: the cancellation wins, the issued lease stays"
 open_pool "R-$RUN" 6
 WON=0

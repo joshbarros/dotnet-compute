@@ -34,6 +34,8 @@ public sealed class MessagingBuilder(IServiceCollection services, bool enabled)
             return;
 
         services.AddSingleton(new OutboxSources(_outboxes));
+        services.AddSingleton(new DeadLetterQueues(_consumers.Select(c => c.Queue).ToList()));
+        services.AddSingleton<DeadLetterService>();
         services.AddHostedService<OutboxRelay>();
         foreach (var registration in _consumers)
         {
@@ -54,6 +56,7 @@ public static class MessagingExtensions
         services.Configure<KafkaOptions>(config.GetSection("Kafka"));
         services.AddSingleton<RabbitConnection>();
         services.AddSingleton<KafkaLog>();
+        services.AddControllers().AddApplicationPart(typeof(MessagingExtensions).Assembly);
         return new MessagingBuilder(services, config.GetValue("Messaging:Enabled", true));
     }
 }

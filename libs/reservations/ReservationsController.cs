@@ -19,10 +19,14 @@ public class ReservationsController(ReservationService service, KafkaLog kafka) 
         return Accepted($"/api/reservations/{reservation.Id}", ReservationDto.From(reservation));
     }
 
-    /// <summary>Your reservations. Staff see everyone's.</summary>
+    /// <summary>Your reservations, newest first, a page at a time (default 100, at most 100). Staff see everyone's. The total is in X-Total-Count.</summary>
     [HttpGet]
-    public async Task<IEnumerable<ReservationDto>> List([FromQuery] string? poolCode, CancellationToken ct) =>
-        (await service.ListAsync(poolCode, ct)).Select(ReservationDto.From);
+    public async Task<IEnumerable<ReservationDto>> List([FromQuery] string? poolCode, [FromQuery] int page = 1, [FromQuery] int pageSize = 100, CancellationToken ct = default)
+    {
+        var (items, total) = await service.ListAsync(poolCode, Math.Max(page, 1), Math.Clamp(pageSize, 1, 100), ct);
+        Response.Headers["X-Total-Count"] = total.ToString();
+        return items.Select(ReservationDto.From);
+    }
 
     [HttpGet("{id:guid}")]
     public async Task<ReservationDto> Get(Guid id, CancellationToken ct) => ReservationDto.From(await service.GetAsync(id, ct));

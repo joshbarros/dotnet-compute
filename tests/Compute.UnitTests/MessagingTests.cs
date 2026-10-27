@@ -83,3 +83,17 @@ public class MessageSerializationTests
     [Fact]
     public void Parse_RejectsAnEmptyBody() => Assert.ThrowsAny<Exception>(() => Json.Parse<ReleaseHours>("null"));
 }
+
+public class DeadLetterTests
+{
+    [Fact]
+    public void TheRoutingKey_ComesFromTheTypeProperty()
+    {
+        var props = new RabbitMQ.Client.BasicProperties { Type = "hours.reserve" };
+        Assert.Equal("hours.reserve", DeadLetterService.RoutingKeyOf(props));
+    }
+
+    [Fact]
+    public void WithoutAType_ThereIsNothingToReplayTo() =>
+        Assert.Null(DeadLetterService.RoutingKeyOf(new RabbitMQ.Client.BasicProperties()));
+}
